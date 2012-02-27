@@ -1,0 +1,36 @@
+POE-Component-Runner version 0.01
+=================================
+
+Here is a POE Component that provides a session which will run arbitrary code
+asynchronously with a minimum of configuration and coding.
+
+INSTALLATION
+
+To install this module type the following:
+
+   perl Makefile.PL
+   make
+   make test
+   make install
+
+DEPENDENCIES
+
+This module requires these other modules and libraries:
+
+  POE
+  POE::Session
+  POE::Wheel::Run
+  POE::Component::DirWatch
+  File::Copy
+
+COPYRIGHT AND LICENCE
+
+Put the correct copyright and licence information here.
+
+Copyright (C) 2012 by Dylan Doxey
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself, either Perl version 5.12.4 or,
+at your option, any later version of Perl 5 you may have available.
+
+

@@ -1,0 +1,6 @@
+Changes
+Makefile.PL
+MANIFEST
+README
+t/POE-Component-Runner.t
+lib/POE/Component/Runner.pm

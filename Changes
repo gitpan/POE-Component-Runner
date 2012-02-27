@@ -1,0 +1,6 @@
+Revision history for Perl extension POE::Component::Runner.
+
+0.01  Sun Feb 26 21:06:41 2012
+	- original version; created by h2xs 1.23 with options
+		-XA -n POE::Component::Runner
+
