@@ -11,6 +11,7 @@ WriteMakefile(
         'POE::Component::DirWatch' => 0,
         'File::Copy'               => 0,
         'Data::GUID'               => 0,
+        'Data::Dumper'             => 0,
     },
     (   $] >= 5.005
         ? ( ABSTRACT_FROM => 'lib/POE/Component/Runner.pm',

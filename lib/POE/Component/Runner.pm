@@ -1,6 +1,6 @@
 package POE::Component::Runner;
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 use 5.008;
 use strict;
@@ -9,6 +9,7 @@ use warnings;
     use Carp;
     use Data::GUID qw( guid );
     use POE qw( Session Wheel::Run );
+    use Data::Dumper;
 }
 
 sub new {
@@ -130,11 +131,6 @@ sub run {
 
             ( $postback, $arg_ra ) = @args;
         }
-
-        if ( ref $arg_ra ne 'ARRAY' ) {
-
-            $arg_ra = [$arg_ra];
-        }
     }
     elsif ( @args == 1 ) {
 
@@ -143,6 +139,11 @@ sub run {
     else {
 
         return;
+    }
+
+    if ( ref $arg_ra ne 'ARRAY' ) {
+
+        $arg_ra = [$arg_ra];
     }
 
     my $task_key;
@@ -160,6 +161,10 @@ sub run {
         $task_key ||= guid()->as_string();
     }
 
+    if ( $heap_rh->{debug} ) {
+        print Dumper( { $task_key => $arg_ra } );
+    }
+
     return
         if $heap_rh->{in_process_rh}->{$task_key};
 
@@ -170,12 +175,15 @@ sub run {
             sender   => $sender,
             arg_ra   => $arg_ra,
             baggage  => $baggage,
-            errors   => 0,
+            err_ra   => [],
+            out_ra   => [],
         };
     }
 
     my $program_rc = sub {
-        return $heap_rh->{func_rc}->( @{$arg_ra} );
+        my $result = $heap_rh->{func_rc}->( @{$arg_ra} );
+        $result = defined $result ? $result : "";
+        return print "$result\n";
     };
 
     my $process = POE::Wheel::Run->new(
@@ -202,7 +210,7 @@ sub run {
     }
     elsif ( $heap_rh->{debug} ) {
 
-        printf "child pid %d started as wheel %d\n", $pid, $wid;
+        printf "PID %d started as wheel %d\n", $pid, $wid;
     }
 
     return;
@@ -240,6 +248,13 @@ sub process_stdout {
         printf "PID %d OUT: %s\n", $pid, $line;
     }
 
+    my $task_key = $heap_rh->{task_key_for_rh}->{$wid};
+
+    if ( exists $heap_rh->{postback_rh}->{$task_key} ) {
+
+        push @{ $heap_rh->{postback_rh}->{$task_key}->{out_ra} }, $line;
+    }
+
     return;
 }
 
@@ -269,7 +284,7 @@ sub process_stderr {
 
     if ( exists $heap_rh->{postback_rh}->{$task_key} ) {
 
-        $heap_rh->{postback_rh}->{$task_key}->{errors}++;
+        push @{ $heap_rh->{postback_rh}->{$task_key}->{err_ra} }, $line;
     }
 
     return;
@@ -308,8 +323,14 @@ sub process_close {
 
         my ( $sender, $postback ) = @{$postback_rh}{qw( sender postback )};
         my ( $arg_ra, $baggage )  = @{$postback_rh}{qw( arg_ra baggage )};
+        my ( $err_ra, $out_ra )   = @{$postback_rh}{qw( err_ra out_ra )};
 
-        $kernel->post( $sender, $postback, $arg_ra, $baggage );
+        my %result = (
+            arg_ra => $arg_ra,
+            err_ra => $err_ra,
+            out_ra => $out_ra,
+        );
+        $kernel->post( $sender, $postback, \%result, $baggage );
     }
 
     return $kernel->delay_add( process_cleanup => 1, $pid, $wid );
@@ -422,7 +443,25 @@ POE::Component::Runner - Create a session for running an arbitrary process.
   );
   POE::Kernel->post( runner => 'run', 'return_state', \@args, \%baggage );
 
-The return_state handler will receive the @args and %baggage refs as ARG0, ARG1.
+The return_state handler will receive ARG0 and ARG1. 
+
+=over
+
+=item ARG0
+
+Contains a hash ref with:
+
+  {
+      arg_ra => \@args,    # As posted
+      out_ra => \@std_out, # Lines written to STDOUT
+      err_ra => \@std_err, # Lines written to STDERR
+  }
+
+=item ARG1
+
+Contains the baggage reference.
+
+=back
 
 =head1 DESCRIPTION
 
