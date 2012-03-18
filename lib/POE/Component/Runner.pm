@@ -1,12 +1,13 @@
 package POE::Component::Runner;
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 use 5.008;
 use strict;
 use warnings;
 {
     use Carp;
+    use Data::GUID qw( guid );
     use POE qw( Session Wheel::Run );
 }
 
@@ -28,10 +29,10 @@ sub new {
         croak __PACKAGE__, ' constructor expects a hash or a hash ref';
     }
 
-    my $alias   = defined $arg{alias} ? delete $arg{alias} : 'runner';
+    my $alias = defined $arg{alias} ? delete $arg{alias} : 'runner';
     my $func_rc = defined $arg{function_rc} ? delete $arg{function_rc} : 0;
     my $cb_rh   = defined $arg{callback_rh} ? delete $arg{callback_rh} : {};
-    my $debug   = defined $arg{debug} ? delete $arg{debug} : 0;
+    my $debug   = defined $arg{debug}       ? delete $arg{debug}       : 0;
 
     $alias =~ s{[^-.\w]}{.}xmsg;
     ($alias) = $alias =~ m{\A ( [-.\w]+ ) \z}xms;    # detaint
@@ -58,9 +59,11 @@ sub new {
     }
 
     for my $unsupported ( keys %{$cb_rh} ) {
+
         carp "$unsupported is not a supported callback state";
     }
     for my $unsupported ( keys %arg ) {
+
         carp "$unsupported is not a supported parameter";
     }
 
@@ -75,15 +78,17 @@ sub new {
     my %runner = (
         heap          => \%heap,
         object_states => [
-            $self => [qw(
-                _start
-                run
-                process_stdout
-                process_stderr
-                process_close
-                process_cleanup
-                _stop
-            )],
+            $self => [
+                qw(
+                    _start
+                    run
+                    process_stdout
+                    process_stderr
+                    process_close
+                    process_cleanup
+                    _stop
+                    )
+            ],
         ],
     );
     POE::Session->create(%runner);
@@ -97,7 +102,7 @@ sub _start {
     $kernel->alias_set( $heap_rh->{alias} );
 
     $heap_rh->{in_process_rh}   = {};
-    $heap_rh->{proc_id_for_rh}  = {};
+    $heap_rh->{task_key_for_rh} = {};
     $heap_rh->{proc_for_wid_rh} = {};
     $heap_rh->{proc_for_pid_rh} = {};
 
@@ -105,19 +110,69 @@ sub _start {
 }
 
 sub run {
-    my ( $kernel, $heap_rh ) = @_[ KERNEL, HEAP ];
-    my ( $arg_ra, $proc_id ) = @_[ ARG0,   ARG1 ];
+    my ( $kernel, $heap_rh, $sender ) = @_[ KERNEL, HEAP, SENDER ];
 
-    $arg_ra ||= [];
+    my @args = grep { defined $_ } @_[ ARG0, ARG1, ARG2, ARG3 ];
 
-    if ( !defined $proc_id ) {
+    my ( $postback, $arg_ra, $baggage );
 
-        $proc_id = join '|', map {"$_"} @{$arg_ra};
-        $proc_id ||= 0;
+    if ( @args > 2 ) {
+
+        ( $postback, $arg_ra, $baggage ) = @args;
+    }
+    elsif ( @args == 2 ) {
+
+        if ( ref $args[0] ) {
+
+            ( $arg_ra, $baggage ) = @args;
+        }
+        elsif ( ref $args[1] ) {
+
+            ( $postback, $arg_ra ) = @args;
+        }
+
+        if ( ref $arg_ra ne 'ARRAY' ) {
+
+            $arg_ra = [$arg_ra];
+        }
+    }
+    elsif ( @args == 1 ) {
+
+        $arg_ra = ref $args[0] eq 'ARRAY' ? $args[0] : [ $args[0] ];
+    }
+    else {
+
+        return;
+    }
+
+    my $task_key;
+
+    if (   $baggage
+        && ref $baggage eq 'HASH'
+        && exists $baggage->{task_key} )
+    {
+        $task_key = $baggage->{task_key};
+    }
+
+    if ( !defined $task_key ) {
+
+        $task_key = join '|', map {"$_"} grep { defined $_ } @{$arg_ra};
+        $task_key ||= guid()->as_string();
     }
 
     return
-        if $heap_rh->{in_process_rh}->{$proc_id};
+        if $heap_rh->{in_process_rh}->{$task_key};
+
+    if ($postback) {
+
+        $heap_rh->{postback_rh}->{$task_key} = {
+            postback => $postback,
+            sender   => $sender,
+            arg_ra   => $arg_ra,
+            baggage  => $baggage,
+            errors   => 0,
+        };
+    }
 
     my $program_rc = sub {
         return $heap_rh->{func_rc}->( @{$arg_ra} );
@@ -134,16 +189,16 @@ sub run {
 
     $kernel->sig_child( $pid, 'process_signal' );
 
-    $heap_rh->{in_process_rh}->{$proc_id} = $wid;
-    $heap_rh->{proc_id_for_rh}->{$wid}    = $proc_id;
-    $heap_rh->{proc_for_pid_rh}->{$pid}   = $process;
-    $heap_rh->{proc_for_wid_rh}->{$wid}   = $process;
+    $heap_rh->{in_process_rh}->{$task_key} = $wid;
+    $heap_rh->{task_key_for_rh}->{$wid}    = $task_key;
+    $heap_rh->{proc_for_pid_rh}->{$pid}    = $process;
+    $heap_rh->{proc_for_wid_rh}->{$wid}    = $process;
 
     my $callback_rc = $heap_rh->{callback_rh}->{start};
 
     if ($callback_rc) {
 
-        $callback_rc->( $pid, $proc_id );
+        $callback_rc->( $pid, $task_key );
     }
     elsif ( $heap_rh->{debug} ) {
 
@@ -155,6 +210,7 @@ sub run {
 
 sub _stop {
     my ( $kernel, $heap_rh ) = @_[ KERNEL, HEAP ];
+
     return $kernel->call('process_cleanup');
 }
 
@@ -209,6 +265,13 @@ sub process_stderr {
         printf "PID %d ERR: %s\n", $pid, $line;
     }
 
+    my $task_key = $heap_rh->{task_key_for_rh}->{$wid};
+
+    if ( exists $heap_rh->{postback_rh}->{$task_key} ) {
+
+        $heap_rh->{postback_rh}->{$task_key}->{errors}++;
+    }
+
     return;
 }
 
@@ -237,6 +300,18 @@ sub process_close {
         printf "WID %d closed all pipes.\n", $wid;
     }
 
+    my $task_key = $heap_rh->{task_key_for_rh}->{$wid};
+
+    if ( exists $heap_rh->{postback_rh}->{$task_key} ) {
+
+        my $postback_rh = delete $heap_rh->{postback_rh}->{$task_key};
+
+        my ( $sender, $postback ) = @{$postback_rh}{qw( sender postback )};
+        my ( $arg_ra, $baggage )  = @{$postback_rh}{qw( arg_ra baggage )};
+
+        $kernel->post( $sender, $postback, $arg_ra, $baggage );
+    }
+
     return $kernel->delay_add( process_cleanup => 1, $pid, $wid );
 }
 
@@ -249,15 +324,15 @@ sub process_cleanup {
 
     if ( !@wids ) {
 
-        @wids = keys %{ $heap_rh->{proc_id_for_rh}->{$wid} };
+        @wids = keys %{ $heap_rh->{task_key_for_rh}->{$wid} };
     }
 
     for my $wid (@wids) {
 
-        my $proc_id = $heap_rh->{proc_id_for_rh}->{$wid};
+        my $task_key = $heap_rh->{task_key_for_rh}->{$wid};
 
-        delete $heap_rh->{proc_id_for_rh}->{$wid};
-        delete $heap_rh->{in_process_rh}->{$proc_id};
+        delete $heap_rh->{task_key_for_rh}->{$wid};
+        delete $heap_rh->{in_process_rh}->{$task_key};
         delete $heap_rh->{proc_for_wid_rh}->{$wid};
     }
 
@@ -338,7 +413,16 @@ POE::Component::Runner - Create a session for running an arbitrary process.
 
     ...
 
-  POE::Kernel->post( runner => 'run', \@args, $task_key );
+  POE::Kernel->post( runner => 'run', 'return_state', \@args );
+
+    ...
+
+  my %baggage = (
+      task_key => 'blah',    # optional task key used to reject redundant calls
+  );
+  POE::Kernel->post( runner => 'run', 'return_state', \@args, \%baggage );
+
+The return_state handler will receive the @args and %baggage refs as ARG0, ARG1.
 
 =head1 DESCRIPTION
 

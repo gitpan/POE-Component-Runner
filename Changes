@@ -1,5 +1,9 @@
 Revision history for Perl extension POE::Component::Runner.
 
+0.02  Sat Mar 17 23:50:53 2012
+    - The run state can postback to the given sender state.
+    - Improved argument reading
+
 0.01  Sun Feb 26 21:06:41 2012
 	- original version; created by h2xs 1.23 with options
 		-XA -n POE::Component::Runner

@@ -82,7 +82,7 @@ sub dispatch_file {
 
     my @args = ( $original_path, $revised_path, );
 
-    return POE::Kernel->post( 'runner', 'run', \@args, $original_path );
+    return POE::Kernel->post( 'runner', 'run', \@args );
 }
 
 sub move_file {

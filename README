@@ -1,4 +1,4 @@
-POE-Component-Runner version 0.01
+POE-Component-Runner version 0.02
 =================================
 
 Here is a POE Component that provides a session which will run arbitrary code
@@ -22,6 +22,7 @@ This module requires these other modules and libraries:
   POE::Wheel::Run
   POE::Component::DirWatch
   File::Copy
+  Data::GUID
 
 COPYRIGHT AND LICENCE
 
