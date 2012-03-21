@@ -1,6 +1,6 @@
 package POE::Component::Runner;
 
-our $VERSION = '0.03';
+our $VERSION = '0.04';
 
 use 5.008;
 use strict;
@@ -186,21 +186,22 @@ sub run {
         return print "$result\n";
     };
 
-    my $process = POE::Wheel::Run->new(
+    my $proc = POE::Wheel::Run->new(
         Program     => $program_rc,
         StdoutEvent => 'process_stdout',
         StderrEvent => 'process_stderr',
         CloseEvent  => 'process_close',
+        CloseOnCall => 1,
     );
 
-    my ( $pid, $wid ) = ( $process->PID, $process->ID );
+    my ( $pid, $wid ) = ( $proc->PID, $proc->ID );
 
     $kernel->sig_child( $pid, 'process_signal' );
 
     $heap_rh->{in_process_rh}->{$task_key} = $wid;
     $heap_rh->{task_key_for_rh}->{$wid}    = $task_key;
-    $heap_rh->{proc_for_pid_rh}->{$pid}    = $process;
-    $heap_rh->{proc_for_wid_rh}->{$wid}    = $process;
+    $heap_rh->{proc_for_pid_rh}->{$pid}    = $proc;
+    $heap_rh->{proc_for_wid_rh}->{$wid}    = $proc;
 
     my $callback_rc = $heap_rh->{callback_rh}->{start};
 
@@ -230,9 +231,9 @@ sub process_stdout {
     my ( $kernel, $heap_rh ) = @_[ KERNEL, HEAP ];
     my ( $line,   $wid )     = @_[ ARG0,   ARG1 ];
 
-    my $process = $heap_rh->{proc_for_wid_rh}->{$wid};
+    my $proc = $heap_rh->{proc_for_wid_rh}->{$wid};
 
-    my $pid = defined $process ? $process->PID : 0;
+    my $pid = defined $proc ? $proc->PID : 0;
 
     return
         if !$pid;
@@ -262,9 +263,9 @@ sub process_stderr {
     my ( $kernel, $heap_rh ) = @_[ KERNEL, HEAP ];
     my ( $line,   $wid )     = @_[ ARG0,   ARG1 ];
 
-    my $process = $heap_rh->{proc_for_wid_rh}->{$wid};
+    my $proc = $heap_rh->{proc_for_wid_rh}->{$wid};
 
-    my $pid = defined $process ? $process->PID : 0;
+    my $pid = defined $proc ? $proc->PID : 0;
 
     return
         if !$pid;
@@ -293,9 +294,9 @@ sub process_stderr {
 sub process_close {
     my ( $kernel, $heap_rh, $wid ) = @_[ KERNEL, HEAP, ARG0 ];
 
-    my $process = $heap_rh->{proc_for_wid_rh}->{$wid};
+    my $proc = $heap_rh->{proc_for_wid_rh}->{$wid};
 
-    my $pid = defined $process ? $process->PID : 0;
+    my $pid = defined $proc ? $proc->PID : 0;
 
     if ($pid) {
 
@@ -374,6 +375,30 @@ sub process_signal {
     my ( $kernel, $heap_rh ) = @_[ KERNEL, HEAP ];
     my ( $pid,    $status )  = @_[ ARG1,   ARG2 ];
 
+    my ( $proc, $task_key, $wid ) = ( "" ) x 3;
+
+    if ( exists $heap_rh->{proc_for_pid_rh}->{$pid} ) {
+
+        $proc = delete $heap_rh->{proc_for_pid_rh}->{$pid};
+
+        $wid = $proc->ID;
+    }
+
+    if ( exists $heap_rh->{task_key_for_rh}->{$wid} ) {
+
+        $task_key = delete $heap_rh->{task_key_for_rh}->{$wid};
+    }
+
+    if ( exists $heap_rh->{in_process_rh}->{$task_key} ) {
+
+         $wid ||= delete $heap_rh->{in_process_rh}->{$task_key};
+    }
+
+    if ( exists $heap_rh->{proc_for_wid_rh}->{$wid} ) {
+
+        $proc ||= delete $heap_rh->{proc_for_wid_rh}->{$wid};
+    }
+
     my $callback_rc = $heap_rh->{callback_rh}->{signal};
 
     if ($callback_rc) {
@@ -384,19 +409,6 @@ sub process_signal {
 
         printf "PID %d exited with status %s.\n", $pid, $status;
     }
-
-    return
-        if !exists $heap_rh->{proc_for_pid_rh}->{$pid};
-
-    my $process = delete $heap_rh->{proc_for_pid_rh}->{$pid};
-
-    return
-        if !defined $process;
-
-    my $wid = $process->ID;
-
-    return
-        if !exists $heap_rh->{proc_for_wid_rh}->{$wid};
 
     return $wid;
 }
@@ -443,7 +455,7 @@ POE::Component::Runner - Create a session for running an arbitrary process.
   );
   POE::Kernel->post( runner => 'run', 'return_state', \@args, \%baggage );
 
-The return_state handler will receive ARG0 and ARG1. 
+The return_state handler will receive ARG0 and ARG1.
 
 =over
 

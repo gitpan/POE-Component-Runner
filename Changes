@@ -1,5 +1,10 @@
 Revision history for Perl extension POE::Component::Runner.
 
+0.04  Mon Mar 19 23:36:06 2012
+    - Revised process_signal to hopefully cleanup better
+        on problem systems.
+    - Use CloseOnCall for code ref type program.
+
 0.03  Sun Mar 18 15:22:29 2012
     - Revised the result returned to make more sense.
 
